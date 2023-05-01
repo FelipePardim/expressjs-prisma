@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import express from "express";
+import redis from "./lib/cache";
 
 const prisma = new PrismaClient();
 
@@ -10,22 +11,45 @@ app.use(express.json());
 app.use(express.raw({ type: "application/vnd.custom-type" }));
 app.use(express.text({ type: "text/html" }));
 
-app.get("/artists", async (req, res) => {
-  const artists = await prisma.artists.findMany();
+const cacheKey = "artists:all";
 
-  res.json(artists);
+app.get("/artists", async (req, res) => {
+  try {
+    const cachedArtists = await redis.get(cacheKey);
+
+    if (cachedArtists) {
+      return res.json(JSON.parse(cachedArtists))
+    }
+
+    const artists = await prisma.artists.findMany();
+    await redis.set(cacheKey, JSON.stringify(artists));
+
+    res.json(artists);
+  } catch (error) {
+    res.json(error)
+  }
+
 });
 
 app.post("/artists", async (req, res) => {
-  const { name } = req.body;
+  try {
+    const { name } = req.body;
 
-  const artists = await prisma.artists.create({
-    data: {
-      name
-    },
-  });
+    const artists = await prisma.artists.create({
+      data: {
+        name
+      },
+    });
 
-  return res.json(artists);
+    redis.del(cacheKey)
+
+    return res.json(artists);
+  } catch (error) {
+    return res.json(error)
+  }
+
+
+
 });
 
 app.get("/", async (req, res) => {
@@ -42,5 +66,5 @@ app.get("/", async (req, res) => {
 });
 
 app.listen(Number(port), "0.0.0.0", () => {
-    console.log(`Example app listening at http://localhost:${port}`);
+  console.log(`Example app listening at http://localhost:${port}`);
 });
